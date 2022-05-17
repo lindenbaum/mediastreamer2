@@ -151,6 +151,10 @@ static int rec_open(MSFilter *f, void *arg){
 				ms_error("Could not lseek to end of file: %s",strerror(err));
 			}
 		}else ms_error("fstat() failed: %s",strerror(errno));
+       }else{
+                if (s->is_wav){
+                        write_wav_header(s->fd, s->rate, s->nchannels, s->size);
+                }
 	}
 	ms_message("MSFileRec: recording into %s",filename);
 	s->writer = ms_async_writer_new(s->fd);
@@ -183,7 +187,7 @@ static int rec_stop(MSFilter *f, void *arg){
 static void write_wav_header(int fd, int rate, int nchannels, int size){
 	wave_header_t header;
 	memcpy(&header.riff_chunk.riff,"RIFF",4);
-	header.riff_chunk.len=le_uint32(size+32);
+        header.riff_chunk.len=le_uint32(size+36);
 	memcpy(&header.riff_chunk.wave,"WAVE",4);
 
 	memcpy(&header.format_chunk.fmt,"fmt ",4);
@@ -211,16 +215,22 @@ static void _rec_close(RecState *s){
 		if (s->is_wav){
 			write_wav_header(s->fd, s->rate, s->nchannels, s->size);
 		}
+                fsync(s->fd);
 		close(s->fd);
 		s->fd=-1;
 	}
 }
 
 static int rec_close(MSFilter *f, void *arg){
-	RecState *s=(RecState*)f->data;
+        RecState *s, copy;
 	ms_mutex_lock(&f->lock);
-	_rec_close(s);
+        s=(RecState*)f->data;
+        copy=*s;
+        s->state=MSRecorderClosed;
+        s->writer = NULL;
+        s->fd=-1;
 	ms_mutex_unlock(&f->lock);
+        _rec_close(&copy);
 	return 0;
 }
 
