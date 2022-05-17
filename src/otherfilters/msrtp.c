@@ -167,7 +167,7 @@ static int sender_set_session(MSFilter * f, void *arg)
 	SenderData *d = (SenderData *) f->data;
 	RtpSession *s = (RtpSession *) arg;
 	PayloadType *pt =
-		rtp_profile_get_payload(rtp_session_get_profile(s),
+		rtp_profile_get_payload(rtp_session_get_send_profile(s),
 								rtp_session_get_send_payload_type(s));
 	d->session = s;
 	if (pt != NULL) {
@@ -215,8 +215,8 @@ static int sender_get_sr(MSFilter *f, void *arg){
 		ms_warning("Could not obtain sample rate, session is not set.");
 		return -1;
 	}
-	pt=rtp_profile_get_payload(rtp_session_get_profile(d->session),
-									rtp_session_get_recv_payload_type(d->session));
+	pt=rtp_profile_get_payload(rtp_session_get_send_profile(d->session),
+									rtp_session_get_send_payload_type(d->session));
 	if (pt != NULL) {
 		if (strcasecmp(pt->mime_type,"G722")==0)
 			*(int*)arg=16000;
@@ -236,7 +236,7 @@ static int sender_get_ch(MSFilter *f, void *arg) {
 		ms_warning("Could not obtain number of channels, session is not set.");
 		return -1;
 	}
-	pt=rtp_profile_get_payload(rtp_session_get_profile(d->session), rtp_session_get_recv_payload_type(d->session));
+	pt=rtp_profile_get_payload(rtp_session_get_send_profile(d->session), rtp_session_get_send_payload_type(d->session));
 	if (pt==NULL){
 		ms_warning("MSRtpSend: Could not obtain number of channels, payload type is unknown.");
 		return -1;
@@ -545,7 +545,7 @@ static int sender_enable_stun_forced(MSFilter *f, void *data) {
 static int get_sender_output_fmt(MSFilter *f, void *arg) {
 	SenderData *d = (SenderData *) f->data;
 	MSPinFormat *pinFmt = (MSPinFormat *)arg;
-	PayloadType *pt = rtp_profile_get_payload(rtp_session_get_profile(d->session), rtp_session_get_send_payload_type(d->session));
+	PayloadType *pt = rtp_profile_get_payload(rtp_session_get_send_profile(d->session), rtp_session_get_send_payload_type(d->session));
 	pinFmt->fmt = ms_factory_get_audio_format(f->factory, pt->mime_type, pt->clock_rate, pt->channels, NULL);
 	return 0;
 }
@@ -644,7 +644,7 @@ static int receiver_set_session(MSFilter * f, void *arg)
 	RtpSession *s = (RtpSession *) arg;
 	PayloadType *pt;
 	d->current_pt=rtp_session_get_recv_payload_type(s);
-	pt = rtp_profile_get_payload(rtp_session_get_profile(s),d->current_pt);
+	pt = rtp_profile_get_payload(rtp_session_get_recv_profile(s),d->current_pt);
 	if (pt != NULL) {
 		d->rate = pt->clock_rate;
 	} else {
@@ -663,7 +663,7 @@ static int receiver_get_sr(MSFilter *f, void *arg){
 		ms_warning("Could not obtain sample rate, session is not set.");
 		return -1;
 	}
-	pt=rtp_profile_get_payload(rtp_session_get_profile(d->session), rtp_session_get_recv_payload_type(d->session));
+	pt=rtp_profile_get_payload(rtp_session_get_recv_profile(d->session), rtp_session_get_recv_payload_type(d->session));
 	if (pt != NULL) {
 		if (strcasecmp(pt->mime_type,"G722")==0)
 			*(int*)arg=16000;
@@ -683,7 +683,7 @@ static int receiver_get_ch(MSFilter *f, void *arg) {
 		ms_warning("MSRtpRecv: Could not obtain sample rate, session is not set.");
 		return -1;
 	}
-	pt=rtp_profile_get_payload(rtp_session_get_profile(d->session), rtp_session_get_recv_payload_type(d->session));
+	pt=rtp_profile_get_payload(rtp_session_get_recv_profile(d->session), rtp_session_get_recv_payload_type(d->session));
 	if (pt == NULL) {
 		ms_warning("MSRtpRecv: could not obtain number of channels, payload type is unknown.");
 		return -1;
@@ -709,7 +709,7 @@ static bool_t receiver_check_payload_type(MSFilter *f, ReceiverData *d, mblk_t *
 	int ptn=rtp_get_payload_type(m);
 	PayloadType *pt;
 	if (ptn==d->current_pt) return TRUE;
-	pt=rtp_profile_get_payload(rtp_session_get_profile(d->session), ptn);
+	pt=rtp_profile_get_payload(rtp_session_get_recv_profile(d->session), ptn);
 	if (pt==NULL){
 		ms_warning("Discarding packet with unknown payload type %i",ptn);
 		return FALSE;
@@ -750,7 +750,7 @@ static void receiver_process(MSFilter * f)
 
 	if (d->starting){
 		PayloadType *pt=rtp_profile_get_payload(
-			rtp_session_get_profile(d->session),
+			rtp_session_get_recv_profile(d->session),
 			rtp_session_get_recv_payload_type(d->session));
 		if (pt && pt->type!=PAYLOAD_VIDEO)
 			rtp_session_flush_sockets(d->session);
@@ -777,7 +777,7 @@ static void receiver_process(MSFilter * f)
 static int get_receiver_output_fmt(MSFilter *f, void *arg) {
 	ReceiverData *d = (ReceiverData *) f->data;
 	MSPinFormat *pinFmt = (MSPinFormat *)arg;
-	PayloadType *pt = rtp_profile_get_payload(rtp_session_get_profile(d->session), rtp_session_get_send_payload_type(d->session));
+	PayloadType *pt = rtp_profile_get_payload(rtp_session_get_recv_profile(d->session), rtp_session_get_recv_payload_type(d->session));
 	pinFmt->fmt = ms_factory_get_audio_format(f->factory, pt->mime_type, pt->clock_rate, pt->channels, NULL);
 	return 0;
 }
