@@ -74,7 +74,7 @@ typedef struct Volume{
 	float ng_gain;
 	MSBufferizer *buffer;
 	OrtpExtremum min;
-	OrtpExtremum max;
+	volatile OrtpExtremum max;
 	bool_t agc_enabled;
 	bool_t noise_gate_enabled;
 	bool_t remove_dc;
