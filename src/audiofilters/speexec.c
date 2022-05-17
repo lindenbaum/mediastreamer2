@@ -243,7 +243,6 @@ static void speex_ec_process(MSFilter *f){
 				ms_flow_controlled_bufferizer_put(&s->ref,refm);
 			}
 		}else{
-			ms_warning("Getting reference signal but no echo to synchronize on.");
 			ms_queue_flush(f->inputs[0]);
 		}
 	}
@@ -266,7 +265,6 @@ static void speex_ec_process(MSFilter *f){
 			ms_bufferizer_put(&s->delayed_ref,refm);
 			ms_queue_put(f->outputs[0],dupmsg(refm));
 			if (!s->using_zeroes){
-				ms_warning("Not enough ref samples, using zeroes");
 				s->using_zeroes=TRUE;
 			}
 		}else{
