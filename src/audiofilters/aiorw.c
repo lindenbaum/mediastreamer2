@@ -289,7 +289,7 @@ void ms_async_writer_destroy(MSAsyncWriter *obj) {
 
 int ms_async_writer_write(MSAsyncWriter *obj, mblk_t *m) {
   if (obj) {
-    int error;
+    int error = 0;
 
     ms_bufferizer_put(&obj->buf, m);
 
