@@ -160,7 +160,7 @@ libmediastreamer_voip_la_SOURCES+=	audiofilters/alaw.c \
 					audiofilters/msgenericplc.c \
 					audiofilters/msfileplayer.c \
 					audiofilters/msfilerec.c \
-					audiofilters/asyncrw.c \
+					audiofilters/aiorw.c \
 					audiofilters/asyncrw.h \
 					audiofilters/waveheader.h \
 					audiofilters/flowcontrol.c \

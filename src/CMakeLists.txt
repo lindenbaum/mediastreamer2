@@ -77,7 +77,7 @@ set(VOIP_SOURCE_FILES_C
 	audiofilters/l16.c
 	audiofilters/msfileplayer.c
 	audiofilters/msfilerec.c
-	audiofilters/asyncrw.c
+	audiofilters/aiorw.c
 	audiofilters/asyncrw.h
 	audiofilters/msg722.c
 	audiofilters/msvaddtx.c
