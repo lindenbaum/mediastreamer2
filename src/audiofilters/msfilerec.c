@@ -104,60 +104,42 @@ static void rec_process(MSFilter *f){
 	ms_mutex_unlock(&f->lock);
 }
 
-static int rec_get_length(const char *file, int *length){
-	wave_header_t header;
-	int fd=open(file,O_RDONLY|O_BINARY);
-	int ret=ms_read_wav_header_from_fd(&header,fd);
-	close(fd);
-	if (ret>0){
-		*length=le_uint32(header.data_chunk.len);
-	}else{
-		*length=0;
-	}
-	return ret;
-}
-
 static int rec_open(MSFilter *f, void *arg){
 	RecState *s=(RecState*)f->data;
 	const char *filename=(const char*)arg;
 	int flags;
-	
+	off_t offset=0;
+
 	if (s->fd!=-1) rec_close(f,NULL);
 	
 	if (strstr(filename, ".wav") == filename + strlen(filename) - 4){
 		s->is_wav = TRUE;
 	}
-	
-	if (access(filename,R_OK|W_OK)==0){
-		flags=O_WRONLY|O_BINARY;
-		if (rec_get_length(filename,&s->size)>0){
-			ms_message("Opening wav file in append mode, current data size is %i",s->size);
-			s->is_wav = TRUE;
-		}
-	}else{
-		flags=O_WRONLY|O_CREAT|O_TRUNC|O_BINARY;
-		s->size=0;
-	}
+
+	s->size=0;
+	flags=O_WRONLY|O_CREAT|O_TRUNC|O_BINARY;
 	s->fd=open(filename, flags, S_IRUSR|S_IWUSR);
 	if (s->fd==-1){
 		ms_warning("Cannot open %s: %s",filename,strerror(errno));
 		return -1;
 	}
-	if (s->size>0){
+	if (s->is_wav){
 		struct stat statbuf;
+
+		write_wav_header(s->fd, s->rate, s->nchannels, s->size);
 		if (fstat(s->fd,&statbuf)==0){
+			offset = statbuf.st_size;
 			if (lseek(s->fd,statbuf.st_size,SEEK_SET) == -1){
-				int err = errno;
-				ms_error("Could not lseek to end of file: %s",strerror(err));
+				ms_error("Could not lseek to end of file: %s",strerror(errno));
 			}
 		}else ms_error("fstat() failed: %s",strerror(errno));
-       }else{
-                if (s->is_wav){
-                        write_wav_header(s->fd, s->rate, s->nchannels, s->size);
-                }
 	}
 	ms_message("MSFileRec: recording into %s",filename);
-	s->writer = ms_async_writer_new(s->fd);
+	s->writer = ms_async_writer_new(s->fd,offset);
+	if (!s->writer){
+		close(s->fd);
+		return -1;
+	}
 	ms_mutex_lock(&f->lock);
 	s->state=MSRecorderPaused;
 	ms_mutex_unlock(&f->lock);

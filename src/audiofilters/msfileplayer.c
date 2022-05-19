@@ -216,8 +216,14 @@ static int player_open(MSFilter *f, void *arg){
 	if (read_wav_header(d)!=0 && strstr(file,".wav")){
 		ms_warning("File %s has .wav extension but wav header could be found.",file);
 	}
-	d->reader = ms_async_reader_new(d->fd);
-	
+	d->reader = ms_async_reader_new(d->fd,d->hsize);
+	if (!d->reader){
+		ms_error("MSFilePlayer[%p]: failed to create reader",f);
+		d->fd=-1;
+		close(fd);
+		return -1;
+	}
+
 	if (fstat(fd, &statbuf) == 0){
 		d->duration = (int) (( 1000LL * ((uint64_t)statbuf.st_size - (uint64_t)d->hsize) / ((uint64_t)d->samplesize * (uint64_t)d->nchannels))  / (uint64_t)d->rate);
 	}else{

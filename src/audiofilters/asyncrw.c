@@ -37,7 +37,7 @@ struct _MSAsyncReader{
 
 static void async_reader_fill(void *data);
 
-MSAsyncReader *ms_async_reader_new(int fd){
+MSAsyncReader *ms_async_reader_new(int fd, off_t offset){
 	MSAsyncReader *obj = ms_new0(MSAsyncReader,1);
 	ms_mutex_init(&obj->mutex, NULL);
 	ms_bufferizer_init(&obj->buf);
@@ -50,7 +50,9 @@ MSAsyncReader *ms_async_reader_new(int fd){
 #endif
 	/*immediately start filling the reader */
 	obj->ntasks_pending++;
-	ms_worker_thread_add_task(obj->wth, async_reader_fill, obj);
+	obj->moving++;
+	obj->seekoff = offset;
+	ms_worker_thread_add_task(obj->wth, async_reader_seek, obj);
 	return obj;
 }
 
@@ -141,7 +143,7 @@ struct _MSAsyncWriter{
 	size_t blocksize;
 };
 
-MSAsyncWriter *ms_async_writer_new(int fd){
+MSAsyncWriter *ms_async_writer_new(int fd, off_t offset){
 	MSAsyncWriter *obj = ms_new0(MSAsyncWriter,1);
 	ms_mutex_init(&obj->mutex, NULL);
 	ms_bufferizer_init(&obj->buf);
