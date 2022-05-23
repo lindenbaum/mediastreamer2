@@ -777,7 +777,12 @@ void ms_factory_uninit_plugins(MSFactory *factory){
 }
 
 void ms_factory_init_plugins(MSFactory *obj) {
-	if (obj->plugins_dir == NULL) {
+	char *package_plugins_dir;
+	// Force plugin dir from environment variable if set
+	package_plugins_dir = getenv("MEDIASTREAMER_PLUGINS_DIR");
+	if (package_plugins_dir != NULL) {
+		ms_factory_set_plugins_dir(obj, package_plugins_dir);
+	} else if (obj->plugins_dir == NULL) {
 #ifdef __APPLE__
 	char *dir = getPluginsDir();
 	if (dir != NULL) {
