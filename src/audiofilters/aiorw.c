@@ -106,8 +106,19 @@ void ms_async_reader_destroy(MSAsyncReader *obj) {
     int error = aio_cancel(obj->aiocb.aio_fildes, &obj->aiocb);
     if (error == AIO_NOTCANCELED) {
       const struct aiocb *list[] = {&obj->aiocb};
-      if (aio_suspend(list, 1, NULL) == 0) {
-        aio_return(&obj->aiocb);
+      aio_suspend(list, 1, NULL);
+    }
+
+    if (!obj->processed) {
+      error = aio_error(&obj->aiocb);
+      if (error == 0) {
+        obj->processed = TRUE;
+        if (aio_return(&obj->aiocb) < 0) {
+          ms_error("ms_async_reader_destroy.aio_return(): %s", strerror(errno));
+        }
+      }
+      else if (error != ECANCELED && error != EINVAL) {
+        ms_error("ms_async_reader_destroy.aio_error(): %s", strerror(error));
       }
     }
 
