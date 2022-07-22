@@ -63,7 +63,7 @@ endif()
 
 set(VOIP_SOURCE_FILES_C
 	audiofilters/alaw.c
-	audiofilters/audiomixer_avx2.c
+	audiofilters/audiomixer2.c
 	audiofilters/chanadapt.c
 	audiofilters/devices.c
 	audiofilters/dtmfgen.c

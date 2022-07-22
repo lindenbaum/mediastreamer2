@@ -16,10 +16,11 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  *
- * This is a re-implementation of the audiomixer filter provided in
- * mediastreamer2/src/audiofilters/audiofilter.c using AVX2 instructions.
+ * An optimized re-implementation of the audiomixer filter provided in
+ * mediastreamer2/src/audiofilters/audiofilter.c. It uses constructs that are
+ * (hopefully) recognized by the GCC auto-vectorizer. It comes for the prize of
+ * reduced features.
  */
-
 
 #include "mediastreamer2/msaudiomixer.h"
 #include "mediastreamer2/msticker.h"
@@ -27,35 +28,53 @@
 #define MIXER_MAX_CHANNELS 128
 #define BYPASS_MODE_TIMEOUT 1000
 
+/*
+ * explicitly target AVX2, a hint to the auto-vectorizer to allow these
+ * instructions when compiling with -O3
+ */
 #pragma GCC target ("avx2")
 
-#define VLENGTH 8
-#define VHISIZE 16
-typedef short v8hi __attribute__((vector_size(VHISIZE)));
-#define VSISIZE 32
-typedef int v8si __attribute__((vector_size(VSISIZE)));
+static MS2_INLINE short saturate_sample(int s) {
+  return (short) (s > 32767 ? 32767 : (s < -32767 ? -32767 : s));
+}
 
-static void accumulate(v8si *sum, v8hi *contrib, int elems) {
+static MS2_INLINE void accumulate(int * __restrict__ sum,
+                                  short * __restrict__ input,
+                                  int nsamples) {
   int i;
-  for (i = 0; i < elems; ++i) {
-    sum[i] = sum[i] + __builtin_ia32_pmovsxwd256(contrib[i]);
+  for (i = 0; i < nsamples; ++i) {
+    sum[i] = sum[i] + input[i];
   }
 }
 
-static MS2_INLINE short saturate(int s) {
-  if (s>32767) return 32767;
-  if (s<-32767) return -32767;
-  return (short) s;
+static MS2_INLINE void subtract_and_copy_to_out(short * __restrict__ out,
+                                                int * __restrict__ sum,
+                                                short * __restrict__ input,
+                                                int nsamples) {
+  int i;
+  for (i = 0; i < nsamples; ++i) {
+    out[i] = saturate_sample(sum[i] - input[i]);
+  }
+}
+
+static MS2_INLINE void copy_to_out(short * __restrict__ out,
+                                   int * __restrict__ sum,
+                                   int nsamples) {
+  int i;
+  for (i = 0; i < nsamples; ++i) {
+    out[i] = saturate_sample(sum[i]);
+  }
 }
 
 typedef struct Channel {
   MSBufferizer bufferizer;
-  v8hi *input; /*the channel contribution, for removal at output*/
+  short *input;
   int min_fullness;
   uint64_t last_flow_control;
   uint64_t last_activity;
   bool_t active;
   bool_t output_enabled;
+  bool_t had_input;
 } Channel;
 
 static void channel_init(Channel *chan) {
@@ -63,26 +82,13 @@ static void channel_init(Channel *chan) {
   chan->input = NULL;
   chan->active = TRUE;
   chan->output_enabled = TRUE;
+  chan->had_input = FALSE;
 }
 
-static void channel_prepare(Channel *chan, int bytes_per_tick) {
-  posix_memalign((void **) &chan->input, VHISIZE, bytes_per_tick);
+static void channel_prepare(Channel *chan, int samples_per_tick) {
+  posix_memalign((void **) &chan->input, 16, samples_per_tick*sizeof(short));
   chan->last_flow_control = (uint64_t) -1;
   chan->last_activity = (uint64_t) -1;
-}
-
-static int channel_process_in(Channel *chan, MSQueue *q, v8si *sum, int nsamples) {
-  ms_bufferizer_put_from_queue(&chan->bufferizer, q);
-  if (ms_bufferizer_read(&chan->bufferizer, (uint8_t *) chan->input, nsamples*2) != 0) {
-    if (chan->active) {
-      accumulate(sum, chan->input, nsamples/VLENGTH);
-    }
-    return nsamples;
-  }
-  else {
-    memset(chan->input, 0, nsamples*2);
-  }
-  return 0;
 }
 
 static int channel_flow_control(Channel *chan, int threshold, uint64_t time) {
@@ -96,7 +102,7 @@ static int channel_flow_control(Channel *chan, int threshold, uint64_t time) {
   size = (int) ms_bufferizer_get_avail(&chan->bufferizer);
   if (chan->min_fullness == -1 || size < chan->min_fullness)
     chan->min_fullness = size;
-  if (time-chan->last_flow_control >= 5000) {
+  if (time - chan->last_flow_control >= 5000) {
     if (chan->min_fullness >= threshold) {
       skip = chan->min_fullness - (threshold/2);
       ms_bufferizer_skip_bytes(&chan->bufferizer, skip);
@@ -105,31 +111,6 @@ static int channel_flow_control(Channel *chan, int threshold, uint64_t time) {
     chan->min_fullness = -1;
   }
   return skip;
-}
-
-static mblk_t *channel_process_out(Channel *chan, v8si *sum, int nsamples) {
-  int i, j;
-  mblk_t *om = allocb(nsamples*2, 0);
-  short *out = (short *) om->b_wptr;
-
-  if (chan->active) {
-    /*remove own contribution from sum*/
-    for (i = 0; i < nsamples/VLENGTH; ++i) {
-      v8si o = sum[i] - __builtin_ia32_pmovsxwd256(chan->input[i]);
-      for (j = 0; j < VLENGTH; ++j) {
-        out[i*VLENGTH + j] = saturate(o[j]);
-      }
-    }
-  }
-  else {
-    for (i = 0; i < nsamples/VLENGTH; ++i) {
-      for (j = 0; j < VLENGTH; ++j) {
-        out[i*VLENGTH + j] = saturate(sum[i][j]);
-      }
-    }
-  }
-  om->b_wptr += nsamples*2;
-  return om;
 }
 
 static void channel_unprepare(Channel *chan) {
@@ -144,10 +125,10 @@ static void channel_uninit(Channel *chan) {
 typedef struct MixerState {
   int nchannels;
   int rate;
-  int bytespertick;
+  int samplespertick;
   Channel channels[MIXER_MAX_CHANNELS];
-  v8si *sum;
   int conf_mode;
+  int *sum;
   int skip_threshold;
   bool_t bypass_mode;
   bool_t single_output;
@@ -159,7 +140,7 @@ static void mixer_init(MSFilter *f) {
   s->conf_mode = FALSE; /*this is the default, don't change it*/
   s->nchannels = 1;
   s->rate = 16000;
-  for(i = 0; i < MIXER_MAX_CHANNELS; ++i){
+  for (i = 0; i < MIXER_MAX_CHANNELS; ++i){
     channel_init(&s->channels[i]);
   }
   f->data = s;
@@ -168,7 +149,7 @@ static void mixer_init(MSFilter *f) {
 static void mixer_uninit(MSFilter *f) {
   int i;
   MixerState *s = (MixerState *) f->data;
-  for(i = 0; i < MIXER_MAX_CHANNELS; ++i) {
+  for (i = 0; i < MIXER_MAX_CHANNELS; ++i) {
     channel_uninit(&s->channels[i]);
   }
   ms_free(s);
@@ -188,11 +169,11 @@ static void mixer_preprocess(MSFilter *f) {
   MixerState *s = (MixerState *) f->data;
   int i;
 
-  s->bytespertick = (2*s->nchannels*s->rate*f->ticker->interval)/1000;
-  posix_memalign((void **) &s->sum, VSISIZE, (s->bytespertick/2)*sizeof(int));
-  for(i = 0; i < MIXER_MAX_CHANNELS; ++i)
-    channel_prepare(&s->channels[i], s->bytespertick);
-  s->skip_threshold = s->bytespertick*2;
+  s->samplespertick = (s->nchannels*s->rate*f->ticker->interval)/1000;
+  posix_memalign((void **) &s->sum, 32, s->samplespertick*sizeof(int));
+  for (i = 0; i < MIXER_MAX_CHANNELS; ++i)
+    channel_prepare(&s->channels[i], s->samplespertick);
+  s->skip_threshold = s->samplespertick*4;
   s->bypass_mode = FALSE;
   s->single_output = has_single_output(f, s);
 }
@@ -203,21 +184,8 @@ static void mixer_postprocess(MSFilter *f) {
 
   free(s->sum);
   s->sum = NULL;
-  for(i = 0; i < MIXER_MAX_CHANNELS; ++i)
+  for (i = 0; i < MIXER_MAX_CHANNELS; ++i)
     channel_unprepare(&s->channels[i]);
-}
-
-static mblk_t *make_output(v8si *sum, int nwords) {
-  mblk_t *om = allocb(nwords*2, 0);
-  short *out = (short *) om->b_wptr;
-  int i, j;
-  for(i = 0; i < nwords/VLENGTH; ++i) {
-    for (j = 0; j < VLENGTH; ++j) {
-      out[i*VLENGTH + j] = saturate(sum[i][j]);
-    }
-  }
-  om->b_wptr += nwords*2;
-  return om;
 }
 
 static void mixer_dispatch_output(MSFilter *f, MixerState*s, MSQueue *inq, int active_input) {
@@ -234,7 +202,7 @@ static void mixer_dispatch_output(MSFilter *f, MixerState*s, MSQueue *inq, int a
         break;
       }
       else {
-        for(m = ms_queue_peek_first(inq); !ms_queue_end(inq, m); m = ms_queue_next(inq, m)) {
+        for (m = ms_queue_peek_first(inq); !ms_queue_end(inq, m); m = ms_queue_next(inq, m)) {
           ms_queue_put(outq, dupmsg(m));
         }
       }
@@ -265,7 +233,7 @@ static bool_t mixer_check_bypass(MSFilter *f, MixerState *s) {
         if (chan->last_activity == (uint64_t) -1) {
           chan->last_activity = curtime;
         }
-        else if (curtime-chan->last_activity < BYPASS_MODE_TIMEOUT) {
+        else if (curtime - chan->last_activity < BYPASS_MODE_TIMEOUT) {
           activeq = q;
           active_cnt++;
           active_input = i;
@@ -294,8 +262,8 @@ static bool_t mixer_check_bypass(MSFilter *f, MixerState *s) {
 
 static void mixer_process(MSFilter *f) {
   MixerState *s = (MixerState *) f->data;
-  int i;
-  int nwords = s->bytespertick/2;
+  mblk_t *om_cached = NULL;
+  int i, bytespertick = s->samplespertick*sizeof(short);
 
   ms_filter_lock(f);
   if (mixer_check_bypass(f, s)) {
@@ -303,40 +271,46 @@ static void mixer_process(MSFilter *f) {
     return;
   }
 
-  memset(s->sum, 0, nwords*sizeof(int));
+  memset(s->sum, 0, s->samplespertick*sizeof(int));
 
   /* read from all inputs and sum everybody */
-  for(i = 0; i < f->desc->ninputs; ++i) {
+  for (i = 0; i < f->desc->ninputs; ++i) {
     MSQueue *q = f->inputs[i];
     if (q) {
-      channel_process_in(&s->channels[i], q, s->sum, nwords);
-      channel_flow_control(&s->channels[i], s->skip_threshold, f->ticker->time);
+      Channel *chan = &s->channels[i];
+      chan->had_input = FALSE;
+
+      ms_bufferizer_put_from_queue(&chan->bufferizer, q);
+      if (ms_bufferizer_read(&chan->bufferizer, (uint8_t *) chan->input, bytespertick) != 0) {
+        if (chan->active) {
+          accumulate(s->sum, chan->input, s->samplespertick);
+          chan->had_input = TRUE;
+        }
+      }
+      channel_flow_control(chan, s->skip_threshold, f->ticker->time);
     }
   }
 
-  if (s->conf_mode == 0) {
-    mblk_t *om = NULL;
-    for(i = 0; i < MIXER_MAX_CHANNELS; ++i) {
-      MSQueue *q = f->outputs[i];
-      Channel *chan = &s->channels[i];
-      if (q && chan->output_enabled) {
-        if (om == NULL) {
-          om = make_output(s->sum, nwords);
-        }
-        else {
-          om = dupb(om);
-        }
-        ms_queue_put(q, om);
+  for (i = 0; i < MIXER_MAX_CHANNELS; ++i) {
+    MSQueue *q = f->outputs[i];
+    Channel *chan = &s->channels[i];
+    if (q && chan->output_enabled) {
+      mblk_t *om = NULL;
+      if (chan->active && chan->had_input && s->conf_mode) {
+        om = allocb(bytespertick, 0);
+        subtract_and_copy_to_out((short *) om->b_wptr, s->sum, chan->input, s->samplespertick);
+        om->b_wptr += bytespertick;
       }
-    }
-  }
-  else {
-    for(i = 0; i < MIXER_MAX_CHANNELS; ++i) {
-      MSQueue *q = f->outputs[i];
-      Channel *chan = &s->channels[i];
-      if (q && chan->output_enabled) {
-        ms_queue_put(q, channel_process_out(&s->channels[i], s->sum, nwords));
+      else if (om_cached == NULL) {
+        om = allocb(bytespertick, 0);
+        copy_to_out((short *) om->b_wptr, s->sum, s->samplespertick);
+        om->b_wptr += bytespertick;
+        om_cached = om;
       }
+      else {
+        om = dupb(om_cached);
+      }
+      ms_queue_put(q, om);
     }
   }
   ms_filter_unlock(f);
@@ -344,7 +318,7 @@ static void mixer_process(MSFilter *f) {
 
 static int mixer_set_rate(MSFilter *f, void *data) {
   int rate = *(int*) data;
-  if (rate == 8000 || rate == 16000) {
+  if (rate % 8000 == 0) {
     MixerState *s = (MixerState *) f->data;
     s->rate = rate;
     return 0;
