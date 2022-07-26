@@ -63,7 +63,6 @@ endif()
 
 set(VOIP_SOURCE_FILES_C
 	audiofilters/alaw.c
-	audiofilters/audiomixer2.c
 	audiofilters/chanadapt.c
 	audiofilters/devices.c
 	audiofilters/dtmfgen.c
@@ -127,6 +126,11 @@ set(VOIP_SOURCE_FILES_C
 	voip/offeranswer.c
 	voip/private.h
 )
+if(ENABLE_AUDIOMIXER2)
+        list(APPEND VOIP_SOURCE_FILES_C audiofilters/audiomixer2.c)
+else()
+        list(APPEND VOIP_SOURCE_FILES_C audiofilters/audiomixer.c)
+endif()
 set(VOIP_SOURCE_FILES_CXX
 	utils/filter-wrapper/decoding-filter-wrapper.cpp
 	utils/filter-wrapper/encoding-filter-wrapper.cpp
