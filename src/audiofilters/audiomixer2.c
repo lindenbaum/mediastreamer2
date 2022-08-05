@@ -28,12 +28,6 @@
 #define MIXER_MAX_CHANNELS 128
 #define BYPASS_MODE_TIMEOUT 1000
 
-/*
- * explicitly target AVX2, a hint to the auto-vectorizer to allow these
- * instructions when compiling with -O3
- */
-#pragma GCC target ("avx2")
-
 static MS2_INLINE short saturate_sample(int s) {
   return (short) (s > 32767 ? 32767 : (s < -32767 ? -32767 : s));
 }

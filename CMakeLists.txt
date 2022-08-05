@@ -110,7 +110,6 @@ option(ENABLE_SPEEX_CODEC "Build mediastreamer2 with the SPEEX codec." YES)
 option(ENABLE_SPEEX_DSP "Build mediastreamer2 with the SPEEX DSP support." YES)
 option(ENABLE_G729 "Build mediastreamer2 with the G729 codec." YES)
 option(ENABLE_G729B_CNG "Build mediastreamer2 with G729 annex B cng." NO)
-option(ENABLE_AUDIOMIXER2 "Build mediastreamer2 with the optimized audiomixer (requires AVX2)." NO)
 cmake_dependent_option(ENABLE_RESAMPLE "Build mediastreamer2 with the resampling capability." YES "ENABLE_SPEEX_DSP" NO)
 
 option(ENABLE_VIDEO "Build mediastreamer2 with video support." YES)
