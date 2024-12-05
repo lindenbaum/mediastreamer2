@@ -63,7 +63,7 @@ endif()
 
 set(VOIP_SOURCE_FILES_C
 	audiofilters/alaw.c
-	audiofilters/audiomixer2.c
+	audiofilters/audiomixer.c
 	audiofilters/chanadapt.c
 	audiofilters/devices.c
 	audiofilters/dtmfgen.c
@@ -591,7 +591,7 @@ if(ENABLE_SHARED)
 		FRAMEWORK DESTINATION Frameworks
 		PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 	)
-
+    
 endif()
 
 #Qt Plugin
@@ -614,14 +614,14 @@ if(ENABLE_QT_GL)
 		add_dependencies(msqogl mediastreamer)
 		target_link_libraries(msqogl PRIVATE mediastreamer bctoolbox ortp)
 		set_target_properties(msqogl PROPERTIES LINKER_LANGUAGE CXX)
-
+		
 		target_include_directories(msqogl INTERFACE
 			$<INSTALL_INTERFACE:include/>
 			$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/>
 			PRIVATE ${QT_MEDIASTREAMER2_INCLUDE_DIRS} ${MEDIASTREAMER2_INCLUDE_DIRS}
 		)
 		target_link_libraries(msqogl PRIVATE ${QT_LINK_LIBS})
-
+		
 		if(APPLE)
 			if(IOS)
 				set(MIN_OS ${LINPHONE_IOS_DEPLOYMENT_TARGET})
@@ -630,11 +630,11 @@ if(ENABLE_QT_GL)
 								MACOSX_FRAMEWORK_IDENTIFIER org.linphone.msqogl
 								MACOSX_FRAMEWORK_INFO_PLIST msqogl.Info.plist.in
 				)
-
+	
 			else()
 				set(MIN_OS ${CMAKE_OSX_DEPLOYMENT_TARGET})
 			endif()
-
+	
 			set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/build/osx/")
 			foreach (package ${QT5_PACKAGES})
 				if(Qt5${package}_FOUND)
@@ -661,7 +661,7 @@ if(ENABLE_QT_GL)
 				PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 		)
 	endif()
-
+	
 endif()
 
 
