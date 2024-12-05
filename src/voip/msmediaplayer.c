@@ -165,6 +165,7 @@ void ms_media_player_set_window_id(MSMediaPlayer *obj, void *window_id) {
 bool_t ms_media_player_open(MSMediaPlayer *obj, const char *filepath) {
 	wave_header_t header;
 	int fd;
+        int rifx;
 	char *tmp;
 	ms_message("Opening %s", filepath);
 	if(access(filepath, F_OK) != 0) {
@@ -182,12 +183,12 @@ bool_t ms_media_player_open(MSMediaPlayer *obj, const char *filepath) {
 			ms_error("Cannot open %s", filepath);
 			return FALSE;
 		}
-		if(ms_read_wav_header_from_fd(&header, fd) == -1) {
+		if(ms_read_wav_header_from_fd(&header, &rifx, fd) == -1) {
 			ms_error("Cannot open %s. Invalid WAV format", filepath);
 			return FALSE;
 		}
 		close(fd);
-		if(wave_header_get_format_type(&header) != WAVE_FORMAT_PCM && wave_header_get_format_type(&header) != WAVE_FORMAT_MULAW && wave_header_get_format_type(&header) != WAVE_FORMAT_ALAW) {
+		if(header.format_chunk.type != WAVE_FORMAT_PCM && header.format_chunk.type != WAVE_FORMAT_MULAW && header.format_chunk.type != WAVE_FORMAT_ALAW) {
 			ms_error("Cannot open %s. Codec not supported", filepath);
 			return FALSE;
 		}

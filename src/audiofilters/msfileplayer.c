@@ -94,56 +94,89 @@ static void player_init(MSFilter *f){
 	d->pcap_initial_ts = 0;
 	d->pcap_seq = 0;
 #endif
-	f->data=d;	
+	f->data=d;
 }
 
-int ms_read_wav_header_from_fd(wave_header_t *header,int fd){
-	int count;
+int ms_read_wav_header_from_fd(wave_header_t *header,int *rifx,int fd){
 	int skip;
 	int hsize=0;
 	riff_t *riff_chunk=&header->riff_chunk;
 	format_t *format_chunk=&header->format_chunk;
 	data_t *data_chunk=&header->data_chunk;
-	
+
 	unsigned long len=0;
-	
+
+        *rifx = 0;
 	len = read(fd, (char*)riff_chunk, sizeof(riff_t)) ;
 	if (len != sizeof(riff_t)){
 		goto not_a_wav;
 	}
-	
-	if (0!=strncmp(riff_chunk->riff, "RIFF", 4) || 0!=strncmp(riff_chunk->wave, "WAVE", 4)){
+
+        *rifx = 0==strncmp(riff_chunk->riff, "RIFX", 4);
+	if ((0!=strncmp(riff_chunk->riff, "RIFF", 4) && !*rifx) ||
+            0!=strncmp(riff_chunk->wave, "WAVE", 4)){
 		goto not_a_wav;
 	}
-	
-	len = read(fd, (char*)format_chunk, sizeof(format_t)) ;            
+
+	len = read(fd, (char*)format_chunk, sizeof(format_t)) ;
 	if (len != sizeof(format_t)){
 		ms_warning("Wrong wav header: cannot read file");
 		goto not_a_wav;
 	}
-	
-	if ((skip=le_uint32(format_chunk->len)-0x10)>0)
-	{
-		lseek(fd,skip,SEEK_CUR);
+
+        if (*rifx){
+                riff_chunk->len=be_uint32(riff_chunk->len);
+                format_chunk->len=be_uint32(format_chunk->len);
+                format_chunk->type=be_uint16(format_chunk->type);
+                format_chunk->channel=be_uint16(format_chunk->channel);
+                format_chunk->rate=be_uint32(format_chunk->rate);
+                format_chunk->bps=be_uint32(format_chunk->bps);
+                format_chunk->blockalign=be_uint16(format_chunk->blockalign);
+                format_chunk->bitpspl=be_uint16(format_chunk->bitpspl);
+        }else{
+                riff_chunk->len=le_uint32(riff_chunk->len);
+                format_chunk->len=le_uint32(format_chunk->len);
+                format_chunk->type=le_uint16(format_chunk->type);
+                format_chunk->channel=le_uint16(format_chunk->channel);
+                format_chunk->rate=le_uint32(format_chunk->rate);
+                format_chunk->bps=le_uint32(format_chunk->bps);
+                format_chunk->blockalign=le_uint16(format_chunk->blockalign);
+                format_chunk->bitpspl=le_uint16(format_chunk->bitpspl);
+        }
+
+	if ((skip=8+format_chunk->len-len)<0)
+                skip=0;
+
+        hsize=lseek(fd,skip,SEEK_CUR);
+	if (hsize < 0){
+		ms_warning("Wrong wav header: cannot seek in file");
+		goto not_a_wav;
 	}
-	hsize=sizeof(wave_header_t)-0x10+le_uint32(format_chunk->len);
-	
-	count=0;
-	do{
+
+	while(1){
 		len = read(fd, data_chunk, sizeof(data_t)) ;
 		if (len != sizeof(data_t)){
-			ms_warning("Wrong wav header: cannot read file");
+                        if (len == 0){
+                                ms_warning("Wrong wav header: no data chunk found");
+                        }else{
+                                ms_warning("Wrong wav header: cannot read file");
+                        }
 			goto not_a_wav;
 		}
 		if (strncmp(data_chunk->data, "data", 4)!=0){
-			lseek(fd,le_uint32(data_chunk->len),SEEK_CUR);
-			count++;
-			hsize+=len+le_uint32(data_chunk->len);
+                        if (*rifx){
+                                data_chunk->len=be_uint32(data_chunk->len);
+                        }else{
+                                data_chunk->len=le_uint32(data_chunk->len);
+                        }
+
+			lseek(fd,data_chunk->len,SEEK_CUR);
+			hsize+=len+data_chunk->len;
 		}else{
 			hsize+=len;
 			break;
 		}
-	}while(count<30);
+	}
 	return hsize;
 
 	not_a_wav:
@@ -153,21 +186,26 @@ int ms_read_wav_header_from_fd(wave_header_t *header,int fd){
 }
 
 static int read_wav_header(PlayerData *d){
+        int rifx;
 	wave_header_t header;
 	format_t *format_chunk=&header.format_chunk;
-	int ret=ms_read_wav_header_from_fd(&header,d->fd);
-	
+	int ret=ms_read_wav_header_from_fd(&header,&rifx,d->fd);
+
 	if (ret==-1) goto not_a_wav;
-	
-	d->type=le_uint16(format_chunk->type);
-	d->rate=le_uint32(format_chunk->rate);
-	d->nchannels=le_uint16(format_chunk->channel);
+
+	d->type=format_chunk->type;
+	d->rate=format_chunk->rate;
+	d->nchannels=format_chunk->channel;
 	if (d->nchannels==0) goto not_a_wav;
-	d->samplesize=le_uint16(format_chunk->blockalign)/d->nchannels;
+	d->samplesize=format_chunk->blockalign/d->nchannels;
 	d->hsize=ret;
-	
+
 	#ifdef WORDS_BIGENDIAN
-	if (le_uint16(format_chunk->blockalign)==le_uint16(format_chunk->channel) * 2)
+	if (format_chunk->blockalign==format_chunk->channel * 2 && !rifx)
+		d->swap=TRUE;
+        #else
+	if (format_chunk->blockalign==format_chunk->channel * 2 && rifx)
+
 		d->swap=TRUE;
 	#endif
 	d->is_raw=FALSE;
@@ -186,7 +224,7 @@ static int player_open(MSFilter *f, void *arg){
 	int fd;
 	const char *file=(const char*)arg;
 	struct stat statbuf;
-	
+
 	if (d->fd!=-1){
 		player_close(f,NULL);
 	}
@@ -354,7 +392,7 @@ static void player_process(MSFilter *f){
 						uint32_t ts = ntohl(*((uint32_t*)(rtp_header + 4)));
 						uint32_t diff_ms;
 						bool_t markbit=rtp_header[1]>>7;
-						
+
 						if (d->pcap_started == FALSE) {
 							d->pcap_started = TRUE;
 							d->pcap_initial_ts = ts;
@@ -455,7 +493,7 @@ static void player_process(MSFilter *f){
 				}else freemsg(om);
 				if (err<bytes){
 					ms_async_reader_seek(d->reader, d->hsize);
-					d->current_pos_bytes = 0; 
+					d->current_pos_bytes = 0;
 
 					/* special value for playing file only once */
 					if (d->loop_after<0){

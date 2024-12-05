@@ -21,32 +21,31 @@
 #ifndef waveheader_h
 #define waveheader_h
 
-#ifdef swap16
-#else
-/* all integer in wav header must be read in least endian order */
 static MS2_INLINE uint16_t swap16(uint16_t a)
 {
 	return ((a & 0xFF) << 8) | ((a & 0xFF00) >> 8);
 }
-#endif
 
-#ifdef swap32
-#else
 static MS2_INLINE uint32_t swap32(uint32_t a)
 {
 	return ((a & 0xFF) << 24) | ((a & 0xFF00) << 8) |
 		((a & 0xFF0000) >> 8) | ((a & 0xFF000000) >> 24);
 }
-#endif
 
 #ifdef WORDS_BIGENDIAN
 #define le_uint32(a) (swap32((a)))
 #define le_uint16(a) (swap16((a)))
 #define le_int16(a) ( (int16_t) swap16((uint16_t)((a))) )
+#define be_uint32(a) (a)
+#define be_uint16(a) (a)
+#define be_int16(a) (a)
 #else
 #define le_uint32(a) (a)
 #define le_uint16(a) (a)
 #define le_int16(a) (a)
+#define be_uint32(a) (swap32((a)))
+#define be_uint16(a) (swap16((a)))
+#define be_int16(a) ( (int16_t) swap16((uint16_t)((a))) )
 #endif
 
 typedef struct _riff_t {
@@ -59,7 +58,7 @@ typedef struct _riff_t {
 
 typedef struct _format_t {
 	char  fmt[4] ;		/* "fmt_" (ASCII characters) */
-	uint32_t   len ;	/* length of FORMAT chunk (always 0x10) */
+	uint32_t   len ;	/* length of FORMAT chunk */
 	uint16_t  type;		/* codec type*/
 	uint16_t channel ;	/* Channel numbers (0x01 = mono, 0x02 = stereo) */
 	uint32_t   rate ;	/* Sample rate (binary, in Hz) */
@@ -90,12 +89,6 @@ typedef struct _wave_header_t
 #define WAVE_FORMAT_EXTENSIBLE	0xFFFE
 #endif
 
-#define wave_header_get_format_type(header)	le_uint16((header)->format_chunk.type)
-#define wave_header_get_rate(header)		le_uint32((header)->format_chunk.rate)
-#define wave_header_get_channel(header)		le_uint16((header)->format_chunk.channel)
-#define wave_header_get_bpsmpl(header) \
-	le_uint16((header)->format_chunk.blockalign)
-
-int ms_read_wav_header_from_fd(wave_header_t *header,int fd);
+int ms_read_wav_header_from_fd(wave_header_t *header, int *rifx, int fd);
 
 #endif
