@@ -201,12 +201,12 @@ static void mixer_preprocess(MSFilter *f){
 static void mixer_postprocess(MSFilter *f){
 	MixerState *s=(MixerState *)f->data;
 	int i;
-	
+
 	ms_free(s->sum);
 	s->sum=NULL;
 	for(i=0;i<MIXER_MAX_CHANNELS;++i)
 		channel_unprepare(&s->channels[i]);
-	
+
 }
 
 static mblk_t *make_output(int32_t *sum, int nwords){
@@ -298,7 +298,7 @@ static void mixer_process(MSFilter *f){
 		ms_filter_unlock(f);
 		return;
 	}
-	
+
 	memset(s->sum,0,nwords*sizeof(int32_t));
 
 	/* read from all inputs and sum everybody */
@@ -308,7 +308,8 @@ static void mixer_process(MSFilter *f){
 		if (q){
 			if (channel_process_in(&s->channels[i],q,s->sum,nwords))
 				got_something=TRUE;
-			if ((skip=channel_flow_control(&s->channels[i],s->skip_threshold,f->ticker->time))>0){
+			if ((skip=channel_flow_control(&s->channels[i],s->skip_threshold,f->ticker->time))>(s->nchannels*s->rate/10000)){
+                                // warn on excess over 20ms only
 				ms_warning("Too much data in channel %i, %i ms in excess dropped",i,(skip*1000)/(2*s->nchannels*s->rate));
 			}
 		}

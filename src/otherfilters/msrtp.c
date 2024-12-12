@@ -107,7 +107,7 @@ static void sender_init(MSFilter * f)
 #ifndef MS2_WINDOWS_UNIVERSAL
 	tmp = getenv("MS2_RTP_FIXED_DELAY");
 #endif
-	
+
 	d->session = NULL;
 	d->tsoff = 0;
 	d->skip_until = 0;
@@ -352,9 +352,9 @@ static int send_dtmf(MSFilter * f, uint32_t timestamp_start)
 	}
 
 
-	
+
 	m1=rtp_session_create_telephone_event_packet(d->session,timestamp_start==d->dtmf_ts_cur);
-	
+
 	if (m1==NULL) return -1;
 
 	d->dtmf_ts_cur+=d->dtmf_ts_step;
@@ -388,13 +388,13 @@ static void check_stun_sending(MSFilter *f) {
 		last_sent_timeout = 2000;
 	if ((d->last_rtp_stun_sent_time == -1) || (  (d->stun_forced_enabled ||  ((f->ticker->time - d->last_sent_time) > last_sent_timeout))
 											&& (f->ticker->time - d->last_rtp_stun_sent_time) >= 500)) {
-		/* send stun packet every 500 ms: 
+		/* send stun packet every 500 ms:
 		 * - in absence of any RTP packet for more than last_sent_timeout
 		 * - or always in "forced" mode */
 		d->last_rtp_stun_sent_time = f->ticker->time;
 		send_stun_packet(d,TRUE,FALSE);
 	}
-	
+
 	if ( rtp_session_rtcp_enabled(s) && (d->last_rtcp_stun_sent_time == -1
 										 || (rtp_session_get_stats(s)->recv_rtcp_packets == 0 /*no need to send stun packets if rtcp packet already received*/
 											 && (f->ticker->time - d->last_rtcp_stun_sent_time) >= 500))) {
@@ -447,7 +447,7 @@ static void _sender_process(MSFilter * f)
 	uint32_t timestamp;
 
 
-	if (d->relay_session_id_size>0 && 
+	if (d->relay_session_id_size>0 &&
 		( (f->ticker->time-d->last_rsi_time)>5000 || d->last_rsi_time==0) ) {
 		ms_message("relay session id sent in RTCP APP");
 		rtp_session_send_rtcp_APP(s,0,"RSID",(const uint8_t *)d->relay_session_id,d->relay_session_id_size);
@@ -460,7 +460,7 @@ static void _sender_process(MSFilter * f)
 		mblk_t *header;
 
 		timestamp = get_cur_timestamp(f, im);
-		
+
 		if (d->dtmf != 0 && !d->skip) {
 			ms_debug("prepare to send RFC2833 dtmf.");
 			d->skip_until = timestamp + d->dtmf_duration;
@@ -711,7 +711,6 @@ static bool_t receiver_check_payload_type(MSFilter *f, ReceiverData *d, mblk_t *
 	if (ptn==d->current_pt) return TRUE;
 	pt=rtp_profile_get_payload(rtp_session_get_recv_profile(d->session), ptn);
 	if (pt==NULL){
-		ms_warning("Discarding packet with unknown payload type %i",ptn);
 		return FALSE;
 	}
 	if (strcasecmp(pt->mime_type,"CN")==0){
@@ -741,9 +740,9 @@ static void receiver_process(MSFilter * f)
 
 	if (d->session == NULL)
 		return;
-	
+
 	if (d->reset_jb){
-		ms_message("Reseting jitter buffer");
+		ms_message("Resetting jitter buffer");
 		rtp_session_resync(d->session);
 		d->reset_jb=FALSE;
 	}
