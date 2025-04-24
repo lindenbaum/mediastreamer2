@@ -38,11 +38,11 @@ static void tee_process(MSFilter *f){
 	TeeData *d=(TeeData*)f->data;
 	mblk_t *im;
 	int i;
-	
+
 	while((im=ms_queue_get(f->inputs[0]))!=NULL){
 		int output_count = 0;
 		mblk_t * outm;
-		
+
 		for(i=0;i<f->desc->noutputs;i++){
 			if (f->outputs[i]!=NULL && !d->muted[i]){
 				if (output_count == 0){
@@ -54,6 +54,10 @@ static void tee_process(MSFilter *f){
 				output_count++;
 			}
 		}
+
+                if (output_count==0){
+                        freemsg(im);
+                }
 	}
 }
 
