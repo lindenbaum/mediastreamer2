@@ -193,6 +193,7 @@ int ms_async_reader_read(MSAsyncReader *obj, uint8_t *buf, size_t size) {
       return error * -1;
     }
   }
+
   return -EINVAL;
 }
 
@@ -369,9 +370,10 @@ int ms_async_writer_write(MSAsyncWriter *obj, mblk_t *m) {
         }
       }
     }
+
+    return 0;
   }
-  else {
-    freemsg(m);
-  }
-  return 0;
+
+  freemsg(m);
+  return 1;
 }

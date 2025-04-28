@@ -73,10 +73,10 @@ static void swap_bytes(unsigned char *bytes, int len){
 static void rec_process(MSFilter *f){
 	RecState *s=(RecState*)f->data;
 	mblk_t *m;
-	
+
 	ms_mutex_lock(&f->lock);
 	while((m=ms_queue_get(f->inputs[0]))!=NULL){
-		
+
 		if (s->state==MSRecorderRunning){
 			int len=(int)(m->b_wptr-m->b_rptr);
 			int max_size_reached = 0;
@@ -92,8 +92,9 @@ static void rec_process(MSFilter *f){
 				}
 				swap_bytes(m->b_rptr,len);
 			}
-			ms_async_writer_write(s->writer,m);
-			s->size+=len;
+			if (ms_async_writer_write(s->writer,m) <= 0) {
+                          s->size+=len;
+                        }
 			if (max_size_reached) {
 				ms_warning("MSFileRec: Maximum size (%d) has been reached. closing file.",s->max_size);
 				_rec_close(s);
@@ -111,7 +112,7 @@ static int rec_open(MSFilter *f, void *arg){
 	off_t offset=0;
 
 	if (s->fd!=-1) rec_close(f,NULL);
-	
+
 	if (strstr(filename, ".wav") == filename + strlen(filename) - 4){
 		s->is_wav = TRUE;
 	}
