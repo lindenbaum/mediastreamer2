@@ -291,6 +291,7 @@ static void mixer_process(MSFilter *f){
 	int i;
 	int nwords=s->bytespertick/2;
 	int skip=0;
+        int skip_ms=0;
 	bool_t got_something=FALSE;
 
 	ms_filter_lock(f);
@@ -308,10 +309,11 @@ static void mixer_process(MSFilter *f){
 		if (q){
 			if (channel_process_in(&s->channels[i],q,s->sum,nwords))
 				got_something=TRUE;
-			if ((skip=channel_flow_control(&s->channels[i],s->skip_threshold,f->ticker->time))>(s->nchannels*s->rate/10000)){
-                                // warn on excess over 20ms only
-				ms_warning("Too much data in channel %i, %i ms in excess dropped",i,(skip*1000)/(2*s->nchannels*s->rate));
-			}
+
+                        skip=channel_flow_control(&s->channels[i],s->skip_threshold,f->ticker->time);
+                        skip_ms=(skip*1000)/(2*s->nchannels*s->rate);
+			if (skip_ms > 20)
+				ms_warning("Too much data in channel %i, %ims in excess dropped",i,skip_ms);
 		}
 	}
 #ifdef ALWAYS_STREAMOUT
