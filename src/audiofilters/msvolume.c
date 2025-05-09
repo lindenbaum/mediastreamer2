@@ -110,7 +110,7 @@ static void volume_init(MSFilter *f){
 #ifdef HAVE_SPEEXDSP
 	v->speex_pp=NULL;
 #endif
-	ortp_extremum_init(&v->max,1000);
+	ortp_extremum_init((OrtpExtremum *) &v->max,1000);
 	ortp_extremum_init(&v->min,30000);
 	f->data=v;
 }
@@ -147,7 +147,7 @@ static int volume_get_min(MSFilter *f, void *arg){
 static int volume_get_max(MSFilter *f, void *arg){
 	float *farg=(float*)arg;
 	Volume *v=(Volume*)f->data;
-	*farg=linear_to_db(ortp_extremum_get_current(&v->max));
+	*farg=linear_to_db(ortp_extremum_get_current((OrtpExtremum *) &v->max));
 	return 0;
 }
 
@@ -411,7 +411,7 @@ static void update_energy(Volume *v, int16_t *signal, int numsamples, uint64_t c
 	v->energy = (en * coef) + v->energy * (1.0f - coef);
 	v->level_pk = (float)pk / max_e;
 	v->instant_energy = en;// currently non-averaged energy seems better (short artefacts)
-	ortp_extremum_record_max(&v->max,curtime,v->energy);
+	ortp_extremum_record_max((OrtpExtremum *) &v->max,curtime,v->energy);
 	ortp_extremum_record_min(&v->min,curtime,v->energy);
 }
 
@@ -481,7 +481,7 @@ static void volume_preprocess(MSFilter *f){
 	}
 #endif
 	ortp_extremum_reset(&v->min);
-	ortp_extremum_reset(&v->max);
+	ortp_extremum_reset((OrtpExtremum *) &v->max);
 }
 
 static void volume_process(MSFilter *f){
