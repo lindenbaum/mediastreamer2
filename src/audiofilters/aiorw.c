@@ -49,10 +49,17 @@ struct _MSAsyncReader {
   struct aiocb aiocb;
 };
 
+typedef enum {
+  AIO_WRITER_STATE_IDLE,
+  // aiocb has not been submitted to aio_write successfully
+  AIO_WRITER_STATE_QUEUED,
+  // aiocb is currently writing
+  AIO_WRITER_STATE_PROCESSING
+} AIO_WRITER_STATE;
+
 struct _MSAsyncWriter {
   off_t offset;
-  bool_t queued; // was aiocb successfully submitted to aio_write
-  bool_t processed; // has aiocb already completed?
+  AIO_WRITER_STATE state;
   MSBufferizer buf;
   struct aiocb aiocb;
 };
@@ -94,7 +101,7 @@ MSAsyncReader *ms_async_reader_new(int fd, off_t offset) {
         return NULL;
       }
       else {
-        ms_message("ms_async_reader_new.aio_read(): EAGAIN");
+        ms_error("ms_async_reader_new.aio_read(): EAGAIN");
       }
     }
   }
@@ -177,7 +184,7 @@ int ms_async_reader_read(MSAsyncReader *obj, uint8_t *buf, size_t size) {
             ms_error("ms_async_reader_read.aio_read(): %s", strerror(errno));
           }
           else {
-            ms_message("ms_async_reader_read.aio_read(): EAGAIN");
+            ms_error("ms_async_reader_read.aio_read(): EAGAIN");
           }
         }
       }
@@ -210,7 +217,7 @@ void ms_async_reader_seek(MSAsyncReader *obj, off_t offset) {
       if (error < 0) {
         obj->processed = TRUE;
         if (errno == EAGAIN) {
-          ms_message("ms_async_reader_seek.aio_read(): EAGAIN");
+          ms_error("ms_async_reader_seek.aio_read(): EAGAIN");
         }
         else {
           ms_error("ms_async_reader_seek.aio_read(): %s", strerror(errno));
@@ -224,8 +231,7 @@ MSAsyncWriter *ms_async_writer_new(int fd, off_t offset) {
   MSAsyncWriter *obj = calloc(1, sizeof(*obj));
   if (obj) {
     obj->offset = offset;
-    obj->queued = FALSE;
-    obj->processed = TRUE;
+    obj->state = AIO_WRITER_STATE_IDLE;
     obj->aiocb.aio_buf = calloc(BLOCK_SIZE, sizeof(uint8_t));
     if (!obj->aiocb.aio_buf) {
       free(obj);
@@ -245,26 +251,30 @@ MSAsyncWriter *ms_async_writer_new(int fd, off_t offset) {
 void ms_async_writer_destroy(MSAsyncWriter *obj) {
   if (obj) {
     size_t avail = ms_bufferizer_get_avail(&obj->buf);
-    while (avail > 0 || obj->queued) {
+    while (avail > 0 || obj->state != AIO_WRITER_STATE_IDLE) {
       int error = 0;
 
-      if (obj->processed) {
-        if (!obj->queued) {
-          avail = ms_bufferizer_read(&obj->buf,
-                                     (uint8_t *) obj->aiocb.aio_buf,
-                                     MIN(BLOCK_SIZE, avail));
-          obj->aiocb.aio_nbytes = avail;
-          obj->aiocb.aio_offset = obj->offset;
-        }
+      if (obj->state == AIO_WRITER_STATE_IDLE) {
+        avail = ms_bufferizer_read(&obj->buf,
+                                   (uint8_t *) obj->aiocb.aio_buf,
+                                   MIN(BLOCK_SIZE, avail));
+        obj->aiocb.aio_nbytes = avail;
+        obj->aiocb.aio_offset = obj->offset;
+        obj->state = AIO_WRITER_STATE_QUEUED;
+      }
 
+      if (obj->state == AIO_WRITER_STATE_QUEUED) {
         error = aio_write(&obj->aiocb);
       }
 
       if (error == 0) {
-        obj->processed = FALSE;
-        obj->queued = FALSE;
         const struct aiocb *list[] = {&obj->aiocb};
-        if (aio_suspend(list, 1, NULL) == 0) {
+        if (aio_suspend(list, 1, NULL) != 0) {
+          ms_error("ms_async_writer_destroy.aio_suspend: (%s)", strerror(errno));
+        }
+
+        error = aio_error(&obj->aiocb);
+        if (error == 0) {
           ssize_t written = aio_return(&obj->aiocb);
           if (written < 0) {
             ms_error("ms_async_writer_destroy.aio_return: (%s)", strerror(errno));
@@ -277,17 +287,26 @@ void ms_async_writer_destroy(MSAsyncWriter *obj) {
           if (written > 0) {
             obj->offset += written;
           }
-          obj->processed = TRUE;
+          obj->state = AIO_WRITER_STATE_IDLE;
+        }
+        else if (error == ECANCELED) {
+          ms_error("ms_async_writer_write.aio_error: (ECANCELED)");
+          obj->state = AIO_WRITER_STATE_QUEUED;
+          ms_usleep(50000);
+        }
+        else if (error != EINPROGRESS) {
+          ms_error("ms_async_writer_write.aio_error: (%s)", strerror(error));
+          obj->state = AIO_WRITER_STATE_IDLE;
         }
       }
       else if (errno == EAGAIN) {
-        ms_message("ms_async_writer_destroy.aio_write: (EAGAIN)");
-        obj->queued = TRUE;
+        ms_error("ms_async_writer_destroy.aio_write: (EAGAIN)");
+        obj->state = AIO_WRITER_STATE_QUEUED;
         ms_usleep(50000);
       }
       else {
         ms_error("ms_async_writer_destroy.aio_write: (%s)", strerror(errno));
-        obj->queued = FALSE;
+        obj->state = AIO_WRITER_STATE_IDLE;
       }
 
       avail = ms_bufferizer_get_avail(&obj->buf);
@@ -305,24 +324,18 @@ int ms_async_writer_write(MSAsyncWriter *obj, mblk_t *m) {
 
     ms_bufferizer_put(&obj->buf, m);
 
-    if (obj->queued) {
+    if (obj->state == AIO_WRITER_STATE_QUEUED) {
       error = aio_write(&obj->aiocb);
       if (error == 0) {
-        obj->processed = FALSE;
-        obj->queued = FALSE;
-        return 0;
+        obj->state = AIO_WRITER_STATE_PROCESSING;
       }
       else {
-        if (errno == EAGAIN) {
-          return -BCTBX_EWOULDBLOCK;
-        }
-        else {
-          return errno * -1;
-        }
+        ms_error("ms_async_writer_write.aio_write: (%s)", strerror(errno));
       }
+      return 0;
     }
 
-    if (!obj->processed) {
+    if (obj->state == AIO_WRITER_STATE_PROCESSING) {
       error = aio_error(&obj->aiocb);
       if (error == 0) {
         ssize_t written = aio_return(&obj->aiocb);
@@ -337,14 +350,19 @@ int ms_async_writer_write(MSAsyncWriter *obj, mblk_t *m) {
         if (written > 0) {
           obj->offset += written;
         }
+        obj->state = AIO_WRITER_STATE_IDLE;
       }
-      else if (error != EINVAL && error != EINPROGRESS && error != ECANCELED) {
+      else if (error == ECANCELED) {
+        ms_error("ms_async_writer_write.aio_error: (ECANCELED)");
+        obj->state = AIO_WRITER_STATE_QUEUED;
+      }
+      else if (error != EINPROGRESS) {
         ms_error("ms_async_writer_write.aio_error: (%s)", strerror(error));
+        obj->state = AIO_WRITER_STATE_IDLE;
       }
-      obj->processed = TRUE;
     }
 
-    if (error != EINPROGRESS) {
+    if (obj->state == AIO_WRITER_STATE_IDLE) {
       size_t avail = ms_bufferizer_get_avail(&obj->buf);
       if (avail >= BLOCK_SIZE) {
         avail = ms_bufferizer_read(&obj->buf,
@@ -354,19 +372,16 @@ int ms_async_writer_write(MSAsyncWriter *obj, mblk_t *m) {
           obj->aiocb.aio_nbytes = avail;
           obj->aiocb.aio_offset = obj->offset;
           error = aio_write(&obj->aiocb);
-          if (error < 0) {
-            if (errno == EAGAIN) {
-              ms_message("ms_async_writer_write.aio_write: (EAGAIN)");
-              obj->queued = TRUE;
-              return -BCTBX_EWOULDBLOCK;
-            }
-            else {
-              ms_error("ms_async_writer_write.aio_write: (%s)", strerror(errno));
-              return errno * -1;
-            }
+          if (error == 0) {
+            obj->state = AIO_WRITER_STATE_PROCESSING;
           }
-          obj->processed = FALSE;
-          return 0;
+          else if (errno == EAGAIN) {
+            ms_error("ms_async_writer_write.aio_write: (EAGAIN)");
+            obj->state = AIO_WRITER_STATE_QUEUED;
+          }
+          else {
+            ms_error("ms_async_writer_write.aio_write: (%s)", strerror(errno));
+          }
         }
       }
     }
@@ -375,5 +390,5 @@ int ms_async_writer_write(MSAsyncWriter *obj, mblk_t *m) {
   }
 
   freemsg(m);
-  return 1;
+  return -1;
 }

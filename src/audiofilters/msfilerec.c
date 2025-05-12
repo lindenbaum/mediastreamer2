@@ -92,7 +92,7 @@ static void rec_process(MSFilter *f){
 				}
 				swap_bytes(m->b_rptr,len);
 			}
-			if (ms_async_writer_write(s->writer,m) <= 0) {
+			if (ms_async_writer_write(s->writer,m) == 0) {
                           s->size+=len;
                         }
 			if (max_size_reached) {
